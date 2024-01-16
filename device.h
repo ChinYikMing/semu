@@ -186,4 +186,5 @@ typedef struct {
     virtio_blk_state_t vblk;
 #endif
     uint32_t timer_lo, timer_hi;
+    int cycle;
 } emu_state_t;

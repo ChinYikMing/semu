@@ -7,10 +7,21 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "device.h"
 #include "riscv.h"
 #include "riscv_private.h"
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+typedef struct rv_data {
+    emu_state_t *emu;
+    vm_t *vm;
+    int target_cycle;
+} rv_data_t;
 
 /* Define fetch separately since it is simpler (fixed width, already checked
  * alignment, only main RAM is executable).
@@ -270,10 +281,23 @@ static void map_file(char **ram_loc, const char *name)
     fstat(fd, &st);
 
     /* remap to a memory region */
+    char buf[4096];
+    int offset = 0;
+    int ret;
+    while((ret = read(fd, buf, 4096)) > 0) {
+	    memcpy(*ram_loc + offset, buf, ret);
+	    //memset(*ram_loc + offset, buf, ret);
+	    offset += ret;
+    }
+    /*
     *ram_loc = mmap(*ram_loc, st.st_size, PROT_READ | PROT_WRITE,
                     MAP_FIXED | MAP_PRIVATE, fd, 0);
     if (*ram_loc == MAP_FAILED) {
         perror("mmap");
+	printf("errno: %d\n", errno);
+	printf("EINVAL: %d\n", EINVAL);
+	printf("size: %lld\n", st.st_size);
+	printf("name: %s\n", name);
         close(fd);
         exit(2);
     }
@@ -281,6 +305,7 @@ static void map_file(char **ram_loc, const char *name)
     mapper[map_index].addr = *ram_loc;
     mapper[map_index].size = st.st_size;
     map_index++;
+    */
 
     /* The kernel selects a nearby page boundary and attempts to create
      * the mapping.
@@ -347,6 +372,52 @@ static void handle_options(int argc,
 
     if (!*dtb_file)
         *dtb_file = "minimal.dtb";
+}
+
+void step(void *arg){
+    rv_data_t *rv_data = (rv_data_t *) arg;
+    emu_state_t *emu = (emu_state_t *) rv_data->emu;
+    vm_t *vm = (vm_t *) rv_data->vm;
+    int target_cycle = rv_data->target_cycle;
+
+    uint32_t peripheral_update_ctr = 0;
+    while (emu->cycle < target_cycle && !emu->stopped) {
+        if (peripheral_update_ctr-- == 0) {
+            peripheral_update_ctr = 64;
+
+            u8250_check_ready(&emu->uart);
+            if (emu->uart.in_ready)
+                emu_update_uart_interrupts(vm);
+        }
+
+        if (vm->insn_count_hi > emu->timer_hi ||
+            (vm->insn_count_hi == emu->timer_hi && vm->insn_count > emu->timer_lo))
+            vm->sip |= RV_INT_STI_BIT;
+        else
+            vm->sip &= ~RV_INT_STI_BIT;
+
+        vm_step(vm);
+        emu->cycle++;
+        if (likely(!vm->error))
+            continue;
+
+        if (vm->error == ERR_EXCEPTION && vm->exc_cause == RV_EXC_ECALL_S) {
+            handle_sbi_ecall(vm);
+	    emu->cycle++;
+            continue;
+        }
+
+        if (vm->error == ERR_EXCEPTION) {
+            vm_trap(vm);
+	    emu->cycle++;
+            continue;
+        }
+
+        vm_error_report(vm);
+        return;
+    }
+
+    emu->cycle = 0;
 }
 
 static int semu_start(int argc, char **argv)
@@ -424,6 +495,13 @@ static int semu_start(int argc, char **argv)
 #endif
 
     /* Emulate */
+#ifdef __EMSCRIPTEN__
+    rv_data_t rv_data;
+    rv_data.emu = &emu;
+    rv_data.vm = &vm;
+    rv_data.target_cycle = 1000000;
+    emscripten_set_main_loop_arg(step, (void *) &rv_data, 0, 1);
+#else
     uint32_t peripheral_update_ctr = 0;
     while (!emu.stopped) {
         if (peripheral_update_ctr-- == 0) {
@@ -451,6 +529,11 @@ static int semu_start(int argc, char **argv)
         else
             vm.sip &= ~RV_INT_STI_BIT;
 
+	if(emu.uart.in_ready == 1){
+		printf("uart readyness in main is 1\n");
+		exit(0);
+	}
+
         vm_step(&vm);
         if (likely(!vm.error))
             continue;
@@ -468,6 +551,7 @@ static int semu_start(int argc, char **argv)
         vm_error_report(&vm);
         return 2;
     }
+#endif
 
     /* unreachable */
     return 0;
@@ -475,5 +559,10 @@ static int semu_start(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+	/*
+    int tmp;
+    scanf("%d", &tmp);
+    printf("tmp: %d\n", tmp);
+    */
     return semu_start(argc, argv);
 }

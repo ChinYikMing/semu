@@ -10,6 +10,10 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 /* Emulate 8250 (plain, without loopback mode support) */
 
 #define U8250_INT_THRE 1
@@ -69,6 +73,11 @@ static void u8250_handle_out(u8250_state_t *uart, uint8_t value)
         fprintf(stderr, "failed to write UART output: %s\n", strerror(errno));
 }
 
+void foo(void *arg){
+	printf("Blocker\n");
+	return;
+}
+
 static uint8_t u8250_handle_in(u8250_state_t *uart)
 {
     uint8_t value = 0;
@@ -76,8 +85,15 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
     if (!uart->in_ready)
         return value;
 
-    if (read(uart->in_fd, &value, 1) < 0)
+    //printf("try to read uart\n");
+    //printf("readyness: %d\n", uart->in_ready);
+    if (read(uart->in_fd, &value, 1) < 0){
+#ifdef __EMSCRIPTEN__
+	    // debug
+	    //emscripten_push_main_loop_blocker(foo, NULL);
+#endif
         fprintf(stderr, "failed to read UART input: %s\n", strerror(errno));
+    }
     uart->in_ready = false;
     u8250_check_ready(uart);
 

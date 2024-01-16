@@ -9,7 +9,7 @@ OBJS_EXTRA :=
 OPTS :=
 
 # virtio-blk
-ENABLE_VIRTIOBLK ?= 1
+ENABLE_VIRTIOBLK ?= 0
 $(call set-feature, VIRTIOBLK)
 DISKIMG_FILE :=
 MKFS_EXT4 ?= mkfs.ext4
@@ -27,7 +27,7 @@ ifeq ($(call has, VIRTIOBLK), 1)
 endif
 
 # virtio-net
-ENABLE_VIRTIONET ?= 1
+ENABLE_VIRTIONET ?= 0
 ifneq ($(UNAME_S),Linux)
     ENABLE_VIRTIONET := 0
 endif
@@ -37,6 +37,18 @@ ifeq ($(call has, VIRTIONET), 1)
 endif
 
 BIN = semu
+
+ifeq ("$(CC)", "emcc")
+BIN := $(BIN).js
+EMCC_CFLAGS += -sINITIAL_MEMORY=2GB --pre-js pre.js --embed-file Image --embed-file minimal.dtb --embed-file rootfs.cpio \
+			        -sEXPORTED_FUNCTIONS=_main \
+				-sEXPORTED_RUNTIME_METHODS=getValue,setValue,stringToNewUTF8,addFunction \
+				-sALLOW_TABLE_GROWTH \
+				-sSTACK_SIZE=4MB \
+				-sMALLOC=mimalloc
+endif
+
+
 all: $(BIN) minimal.dtb
 
 OBJS := \
@@ -50,8 +62,9 @@ OBJS := \
 deps := $(OBJS:%.o=.%.o.d)
 
 $(BIN): $(OBJS)
+	npm install xterm
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $(EMCC_CFLAGS) $^ $(LDFLAGS)
 
 %.o: %.c
 	$(VECHO) "  CC\t$@\n"
@@ -88,11 +101,11 @@ build-image:
 	scripts/build-image.sh
 
 clean:
-	$(Q)$(RM) $(BIN) $(OBJS) $(deps)
+	$(Q)$(RM) $(BIN) $(OBJS) $(deps) semu.js semu.wasm
 
 distclean: clean
 	$(Q)$(RM) minimal.dtb
 	$(Q)$(RM) Image rootfs.cpio
-	$(Q)$(RM) ext4.img 
+	$(Q)$(RM) ext4.img
 
 -include $(deps)
