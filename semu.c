@@ -344,21 +344,8 @@ struct uart {
 #ifdef __EMSCRIPTEN__
 static int read_from_wasm(void *buf, int count){
 	EM_ASM(
-		//if(Module.stdin_buf.length == 0){
-		//	Module.stdin_buf[0] = 108;
-		//} else {
-		//	if(Module.stdin_buf[0] == 108){
-		//		Module.stdin_buf[0] = 115;
-		//	} else if(Module.stdin_buf[0] == 115){
-		//		Module.stdin_buf[0] = 13;
-		//	} else if(Module.stdin_buf[0] == 13){
-		//		Module.stdin_buf[0] = 108;
-		//	}
-		//}
-		//Module.stdin_buf[0] = 108;
-		//Module.stdin_buf[1] = 115;
-		//Module.stdin_buf[2] = 13;
-		console.log("stdin_buf inside ASM: ", Module['stdin_buf']);
+		//console.log("stdin_buf inside ASM: ", Module['stdin_buf']);
+		console.log("stdin_buf inside ASM: ", Module);
 	);
 	int res = EM_ASM_INT({return Module['stdin_buf'].shift() | 0;});
 	//int res = EM_ASM_INT_V({return Module.stdin_buf.shift() | 0;});
@@ -366,6 +353,7 @@ static int read_from_wasm(void *buf, int count){
 	int *ptr = (int *) buf;
 	*ptr = res;
 	return res;
+	//return res == 0 ? EOF : 1;
 }
 #endif
 
@@ -387,6 +375,8 @@ static void *uart_thread_func(void *priv)
         if (read(STDIN_FILENO, &c, 1) <= 0) /* an error or EOF */
             continue;
 #endif
+
+	//printf("c: %c\n", c);
 
         pthread_mutex_lock(&uart->lock);
         while ((uart->data[UART_LSR - UART_BASE] & UART_LSR_RX) == 1)
