@@ -1,12 +1,18 @@
 #include <poll.h>
+#include <sys/select.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <unistd.h>
 #include "mul128.h"
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 /* xv6 uses only 128MiB of memory. */
 #define RAM_SIZE (1024 * 1024 * 128)
@@ -226,6 +232,7 @@ static inline exception_t clint_load(const struct clint *clint,
                                      const uint64_t size,
                                      uint64_t *result)
 {
+    //printf("plic load called\n");
     if (size != 64)
         return LOAD_ACCESS_FAULT;
 
@@ -334,9 +341,38 @@ struct uart {
     pthread_cond_t cond;
 };
 
+#ifdef __EMSCRIPTEN__
+static int read_from_wasm(void *buf, int count){
+	EM_ASM(
+		//if(Module.stdin_buf.length == 0){
+		//	Module.stdin_buf[0] = 108;
+		//} else {
+		//	if(Module.stdin_buf[0] == 108){
+		//		Module.stdin_buf[0] = 115;
+		//	} else if(Module.stdin_buf[0] == 115){
+		//		Module.stdin_buf[0] = 13;
+		//	} else if(Module.stdin_buf[0] == 13){
+		//		Module.stdin_buf[0] = 108;
+		//	}
+		//}
+		//Module.stdin_buf[0] = 108;
+		//Module.stdin_buf[1] = 115;
+		//Module.stdin_buf[2] = 13;
+		console.log("stdin_buf inside ASM: ", Module['stdin_buf']);
+	);
+	int res = EM_ASM_INT({return Module['stdin_buf'].shift() | 0;});
+	//int res = EM_ASM_INT_V({return Module.stdin_buf.shift() | 0;});
+	//printf("res: %c\n", res);
+	int *ptr = (int *) buf;
+	*ptr = res;
+	return res;
+}
+#endif
+
 static void *uart_thread_func(void *priv)
 {
     struct uart *uart = (struct uart *) priv;
+
     while (1) {
         struct pollfd pfd = {0, POLLIN, 0};
         poll(&pfd, 1, 0);
@@ -344,8 +380,13 @@ static void *uart_thread_func(void *priv)
             continue;
 
         char c;
+#ifdef __EMSCRIPTEN__
+	if((c = read_from_wasm(&c, 1)) <= 0)
+	    continue;
+#else
         if (read(STDIN_FILENO, &c, 1) <= 0) /* an error or EOF */
             continue;
+#endif
 
         pthread_mutex_lock(&uart->lock);
         while ((uart->data[UART_LSR - UART_BASE] & UART_LSR_RX) == 1)
@@ -368,7 +409,10 @@ struct uart *uart_new()
     pthread_mutex_init(&uart->lock, NULL);
     pthread_cond_init(&uart->cond, NULL);
 
-    pthread_create(&uart->tid, NULL, uart_thread_func, (void *) uart);
+    int ret = pthread_create(&uart->tid, NULL, uart_thread_func, (void *) uart);
+    if (ret != 0)
+	    perror("pthread_create");
+    //printf("ret: %d\n", ret);
     return uart;
 }
 
@@ -377,6 +421,7 @@ exception_t uart_load(struct uart *uart,
                       const uint64_t size,
                       uint64_t *result)
 {
+	//printf("uart load called\n");
     if (size != 8)
         return LOAD_ACCESS_FAULT;
 
@@ -678,11 +723,13 @@ struct cpu {
     struct bus *bus;
     bool enable_paging;
     uint64_t pagetable;
+    int cycle;
 };
 
 struct cpu *cpu_new(uint8_t *code, const size_t code_size, uint8_t *disk)
 {
     struct cpu *cpu = calloc(1, sizeof(struct cpu));
+    cpu->cycle = 0;
 
     /* Initialize the sp(x2) register. */
     cpu->regs[2] = RAM_BASE + RAM_SIZE;
@@ -1710,6 +1757,45 @@ int semu_test_start(int argc, char **argv)
 }
 #endif
 
+void step(void *arg){
+    struct cpu *cpu = (struct cpu *) arg;
+    int target_cycle = 1000000;
+
+    while (cpu->cycle < target_cycle) {
+        /* Fetch instruction */
+        uint64_t insn;
+        exception_t e;
+        if ((e = cpu_fetch(cpu, &insn)) != OK) {
+            cpu_take_trap(cpu, e, NONE);
+	    cpu->cycle++;
+            if (exception_is_fatal(e))
+                break;
+            insn = 0;
+        }
+
+        cpu->pc += 4; /* advance pc */
+
+        /* decode and execute */
+        if ((e = cpu_execute(cpu, insn)) != OK) {
+            cpu_take_trap(cpu, e, NONE);
+	    cpu->cycle++;
+            if (exception_is_fatal(e))
+                break;
+        }
+
+        interrupt_t intr;
+        if ((intr = cpu_check_pending_interrupt(cpu)) != NONE){
+            cpu_take_trap(cpu, OK, intr);
+	}
+
+        cpu->cycle++;
+    }
+
+    cpu->cycle = 0;
+
+    return;
+}
+
 int semu_start(int argc, char **argv)
 {
     FILE *f = fopen(argv[1], "rb");
@@ -1731,6 +1817,9 @@ int semu_start(int argc, char **argv)
     struct cpu *cpu = cpu_new(binary, fsize, disk);
     free(binary);
 
+#ifdef __EMSCRIPTEN__
+	emscripten_set_main_loop_arg(step, (void *) cpu, 0, 1);
+#else
     while (1) {
         /* Fetch instruction */
         uint64_t insn;
@@ -1755,6 +1844,7 @@ int semu_start(int argc, char **argv)
         if ((intr = cpu_check_pending_interrupt(cpu)) != NONE)
             cpu_take_trap(cpu, OK, intr);
     }
+#endif
 
     return 0;
 }
