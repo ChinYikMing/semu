@@ -76,24 +76,35 @@ div.emscripten_border { border: 1px solid black; }
     </div>
 
     <script type='text/javascript'>
-      var progressElement = document.getElementById('progress');
-
       var term = new Terminal({
         cursorBlink: "block",
         cols: 120,
+	'theme': {
+		background: 'black',
+		cursor: 'magenta',
+	},
       });
       term.open(document.getElementById('terminal'));
 
       term.onData(function(ch) {
 	//worker.postMessage(str);
-	console.log(ch);
-	console.log(ch.charCodeAt(0));
-	term.write(ch);
-	Module.stdin_buf.push(ch.charCodeAt(0));
-	//console.log(Module['stdin_buf']);
+	console.log('char: ', ch, ch.charCodeAt(0));
+	var chCode = ch.charCodeAt(0);
+	if(chCode === 13){ //space
+		term.writeln('');
+        } else if(chCode === 127){
+		term.write('\b \b');
+        } else {
+		term.write(ch);
+	}
+	console.log("buffer: ", term.buffer);
+
+	Module['stdin_buf'].push(ch.charCodeAt(0));
+	//console.log("inside html module ", Module['stdin_buf']);
       });
 
       var Module = {
+	stdin_buf: [],
         print: (function() {
           var element = document.getElementById('output');
           if (element) element.value = ''; // clear browser cache

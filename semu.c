@@ -342,18 +342,12 @@ struct uart {
 };
 
 #ifdef __EMSCRIPTEN__
-static int read_from_wasm(void *buf, int count){
-	EM_ASM(
-		//console.log("stdin_buf inside ASM: ", Module['stdin_buf']);
-		console.log("stdin_buf inside ASM: ", Module);
-	);
-	int res = EM_ASM_INT({return Module['stdin_buf'].shift() | 0;});
-	//int res = EM_ASM_INT_V({return Module.stdin_buf.shift() | 0;});
-	//printf("res: %c\n", res);
-	int *ptr = (int *) buf;
-	*ptr = res;
-	return res;
-	//return res == 0 ? EOF : 1;
+//FIXME: count is not used
+static int read_from_wasm(char *buf, int count){
+	*buf = MAIN_THREAD_EM_ASM_INT({
+		return Module['stdin_buf'].shift() | 0;
+	});
+	return *buf == 0 ? EOF : 1;
 }
 #endif
 
@@ -369,7 +363,7 @@ static void *uart_thread_func(void *priv)
 
         char c;
 #ifdef __EMSCRIPTEN__
-	if((c = read_from_wasm(&c, 1)) <= 0)
+	if(read_from_wasm(&c, 1) <= 0)
 	    continue;
 #else
         if (read(STDIN_FILENO, &c, 1) <= 0) /* an error or EOF */
