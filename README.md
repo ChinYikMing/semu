@@ -11,14 +11,13 @@ A minimalist RISC-V system emulator capable of running Linux the kernel and corr
 - Standard SBI, with the timer extension
 - VirtIO: virtio-blk acquires disk image from the host, and virtio-net is mapped as TAP interface
 
-## Usage
+## Steps to reproduce
 
-1. make check
-2. press Ctrl+a, release, then press x
-3. make clean
-4. source ~/emsdk/emsdk_env.sh
-5. make CC=emcc
-6. run your web server to host the semu.html
+1. git clone https://github.com/ChinYikMing/semu.git --depth=1 -b linux-wasm
+2. cd semu
+2. source ~/emsdk/emsdk_env.sh
+3. make CC=emcc
+4. node semu.js
 
 ## License
 
