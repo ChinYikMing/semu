@@ -5,6 +5,5 @@ semu
 
 # Linux-specific
 *.dtb
-Image
 ext4.img
 rootfs.cpio

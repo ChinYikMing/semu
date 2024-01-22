@@ -502,8 +502,10 @@ static int semu_start(int argc, char **argv)
     rv_data.target_cycle = 1000000;
     emscripten_set_main_loop_arg(step, (void *) &rv_data, 0, 1);
 #else
+    uint32_t target_cycle = 1000000;
     uint32_t peripheral_update_ctr = 0;
-    while (!emu.stopped) {
+restart:
+    while (emu.cycle < target_cycle && !emu.stopped) {
         if (peripheral_update_ctr-- == 0) {
             peripheral_update_ctr = 64;
 
@@ -529,28 +531,36 @@ static int semu_start(int argc, char **argv)
         else
             vm.sip &= ~RV_INT_STI_BIT;
 
+	/*
 	if(emu.uart.in_ready == 1){
 		printf("uart readyness in main is 1\n");
 		exit(0);
 	}
+	*/
 
         vm_step(&vm);
+	emu.cycle++;
         if (likely(!vm.error))
             continue;
 
         if (vm.error == ERR_EXCEPTION && vm.exc_cause == RV_EXC_ECALL_S) {
             handle_sbi_ecall(&vm);
+		emu.cycle++;
             continue;
         }
 
         if (vm.error == ERR_EXCEPTION) {
             vm_trap(&vm);
+		emu.cycle++;
             continue;
         }
 
         vm_error_report(&vm);
         return 2;
     }
+
+    emu.cycle = 0;
+    goto restart;
 #endif
 
     /* unreachable */

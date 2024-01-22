@@ -14,6 +14,7 @@ $(call set-feature, VIRTIOBLK)
 DISKIMG_FILE :=
 MKFS_EXT4 ?= mkfs.ext4
 ifeq ($(call has, VIRTIOBLK), 1)
+    $(info "virtioblk called")
     OBJS_EXTRA += virtio-blk.o
     DISKIMG_FILE := ext4.img
     OPTS += -d $(DISKIMG_FILE)
@@ -33,6 +34,7 @@ ifneq ($(UNAME_S),Linux)
 endif
 $(call set-feature, VIRTIONET)
 ifeq ($(call has, VIRTIONET), 1)
+    $(info "virtionet called")
     OBJS_EXTRA += virtio-net.o
 endif
 
@@ -45,11 +47,13 @@ EMCC_CFLAGS += -sINITIAL_MEMORY=2GB --pre-js pre.js --embed-file Image --embed-f
 				-sEXPORTED_RUNTIME_METHODS=getValue,setValue,stringToNewUTF8,addFunction \
 				-sALLOW_TABLE_GROWTH \
 				-sSTACK_SIZE=4MB \
-				-sMALLOC=mimalloc
+				-sMALLOC=mimalloc \
+				-sUSE_PTHREADS \
+				-sPTHREAD_POOL_SIZE=16
 endif
 
 
-all: $(BIN) minimal.dtb
+all: minimal.dtb $(BIN)
 
 OBJS := \
 	riscv.o \
@@ -62,9 +66,14 @@ OBJS := \
 deps := $(OBJS:%.o=.%.o.d)
 
 $(BIN): $(OBJS)
-	npm install xterm
+	#npm install xterm
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $(EMCC_CFLAGS) $^ $(LDFLAGS)
+	#sudo cp semu.js /var/www/html/linux/
+	#sudo cp semu.worker.js /var/www/html/linux/
+	#sudo cp semu.wasm /var/www/html/linux/
+	#sudo cp semu.html /var/www/html/linux/
+	#sudo cp -r node_modules /var/www/html/linux/
 
 %.o: %.c
 	$(VECHO) "  CC\t$@\n"

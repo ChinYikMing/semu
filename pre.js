@@ -1,4 +1,3 @@
-Module['stdin'] = function(){ return "root"; }
 Module['arguments'] = []
 Module['arguments'].push("-k");
 Module['arguments'].push("Image");
